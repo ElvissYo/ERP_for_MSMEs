@@ -118,11 +118,11 @@ export const AppProvider = ({
     setPurchaseOrders((prev: any[]) => [{ po_id: `PO-${Date.now()}`, status: 'AWAITING_DELIVERY', ...po }, ...prev]);
   };
 
-  const receiveGoods = (poId: string, userId: string) => {
+  const receiveGoods = (poId: string, _userId: string) => {
     setPurchaseOrders((prev: any[]) => prev.map(p => p.po_id === poId ? { ...p, status: 'RECEIVED' } : p));
   };
 
-  const payBill = (poId: string, userId: string) => {
+  const payBill = (poId: string, _userId: string) => {
     setPurchaseOrders((prev: any[]) => prev.map(p => p.po_id === poId ? { ...p, status: 'PAID' } : p));
   };
 
@@ -134,7 +134,7 @@ export const AppProvider = ({
     }));
   };
 
-  const voidTransaction = (transactionId: string, reason: string, userId: string) => {
+  const voidTransaction = (transactionId: string, _reason: string, _userId: string) => {
     setTransactions((prev: Transaction[]) => prev.map(t => t.transaction_id === transactionId ? { ...t, payment_status: 'VOIDED' } : t));
   };
 

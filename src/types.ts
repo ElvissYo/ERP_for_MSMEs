@@ -128,10 +128,10 @@ export interface JournalEntry {
   debit_account: string; // Account Code
   credit_account: string; // Account Code
   amount: number;
-  description: string;
+  description?: string;
   created_by: string;
   entry_date: string;
-  entry_type: 'SALES' | 'COGS' | 'PROCUREMENT' | 'EXPENSE' | 'CASH_ADJUSTMENT' | 'TAX';
+  entry_type?: 'SALES' | 'COGS' | 'PROCUREMENT' | 'EXPENSE' | 'CASH_ADJUSTMENT' | 'TAX';
 }
 
 // Audit Trail Interface

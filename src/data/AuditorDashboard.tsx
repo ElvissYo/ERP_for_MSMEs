@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import type { User } from '../types';
+import type { User } from './index';
 
 /* ─── IC Badge ─── */
 function ICBadge({ id, text }: { id: string; text: string }) {
@@ -52,20 +52,17 @@ function SevBadge({ sev }: { sev: string }) {
 }
 
 /* ─── Main Auditor Dashboard ─── */
-export default function AuditorDashboard({ user, activeTab }: { user: User; activeTab: string }) {
+export default function AuditorDashboard({ user: _user, activeTab: _activeTab }: { user: User; activeTab: string }) {
   const {
     journalEntries = [],
     auditTrail = [],
     transactions = [],
-    getTrialBalance,
-    getAnomalies,
   } = useAppContext() || {};
 
   const [tab, setTab] = useState<'journal' | 'audit' | 'trial' | 'anomaly'>('journal');
   const [search, setSearch] = useState('');
 
   const trialBalance = useMemo(() => {
-    if (getTrialBalance) return getTrialBalance() || [];
     
     // Rumus Otomatis Pembuatan Neraca Saldo jika Context tidak memilikinya
     const balances: Record<string, { code: string, name: string, debit: number, credit: number }> = {};
@@ -95,10 +92,9 @@ export default function AuditorDashboard({ user, activeTab }: { user: User; acti
         debit_balance: net > 0 ? net : 0, credit_balance: net < 0 ? -net : 0
       };
     }).sort((a, b) => a.account_code.localeCompare(b.account_code));
-  }, [getTrialBalance, journalEntries]);
+  }, [journalEntries]);
 
   const anomalies = useMemo(() => {
-    if (getAnomalies) return getAnomalies() || [];
     
     // Deteksi Anomali / Red Flags Otomatis
     const result: any[] = [];
@@ -110,10 +106,10 @@ export default function AuditorDashboard({ user, activeTab }: { user: User; acti
       }
     });
     return result.sort((a, b) => new Date(b.detected_at).getTime() - new Date(a.detected_at).getTime());
-  }, [getAnomalies, transactions]);
+  }, [transactions]);
 
-  const totalDebit = trialBalance.reduce((s, t) => s + t.debit_balance, 0);
-  const totalCredit = trialBalance.reduce((s, t) => s + t.credit_balance, 0);
+  const totalDebit = trialBalance.reduce((s: number, t: any) => s + t.debit_balance, 0);
+  const totalCredit = trialBalance.reduce((s: number, t: any) => s + t.credit_balance, 0);
   const isBalanced = Math.abs(totalDebit - totalCredit) < 0.01;
 
   const filteredJournals = journalEntries.filter(j =>
@@ -246,7 +242,7 @@ export default function AuditorDashboard({ user, activeTab }: { user: User; acti
                   </tr>
                 </thead>
                 <tbody className="divide-y divide-slate-100">
-                  {trialBalance.map(tb => (
+                  {trialBalance.map((tb: any) => (
                     <tr key={tb.account_code} className="hover:bg-slate-50/70">
                       <td className="px-5 py-3 font-mono text-xs text-slate-500">{tb.account_code}</td>
                       <td className="px-5 py-3 text-xs font-medium text-slate-700">{tb.account_name}</td>
@@ -276,7 +272,7 @@ export default function AuditorDashboard({ user, activeTab }: { user: User; acti
               <ICBadge id="IC-8" text="Anomaly Notification" />
             </div>
             {anomalies.length === 0 && <div className="text-sm text-slate-400 text-center py-8">No anomalies detected</div>}
-            {anomalies.map(a => (
+            {anomalies.map((a: any) => (
               <div key={a.anomaly_id} className="flex items-start gap-3 bg-red-50 border border-red-200 rounded-xl px-4 py-3">
                 <div className="w-8 h-8 bg-red-100 rounded-full flex items-center justify-center shrink-0 mt-0.5">
                   <svg className="w-4 h-4 text-red-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 9v2m0 4h.01m-6.938 4h13.856c1.54 0 2.502-1.667 1.732-3L13.732 4c-.77-1.333-2.694-1.333-3.464 0L3.34 16c-.77 1.333.192 3 1.732 3z" /></svg>

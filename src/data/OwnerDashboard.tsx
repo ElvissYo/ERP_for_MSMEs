@@ -1,6 +1,6 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import type { User, PurchaseOrder, Inventory } from '../types';
+import type { User, Inventory } from './index';
 
 /* ─── IC Badge ─── */
 function ICBadge({ id, text }: { id: string; text: string }) {
@@ -21,18 +21,6 @@ function KPICard({ label, value, sub, accent, icon }: any) {
         <p className="text-lg font-bold text-slate-900 leading-tight">{value}</p>
         {sub && <p className="text-[10px] text-slate-400 mt-0.5">{sub}</p>}
       </div>
-    </div>
-  );
-}
-
-/* ─── Mini Sparkline (CSS only) ─── */
-function MiniBar({ values, color }: { values: number[]; color: string }) {
-  const max = Math.max(...values, 1);
-  return (
-    <div className="flex items-end gap-0.5 h-8">
-      {values.map((v, i) => (
-        <div key={i} className={`w-1.5 rounded-sm ${color}`} style={{ height: `${(v / max) * 100}%` }} />
-      ))}
     </div>
   );
 }

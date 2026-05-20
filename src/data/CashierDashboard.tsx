@@ -1,7 +1,7 @@
-import React, { useState, useMemo } from 'react';
+import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
-import { getActiveServices } from '../data/services';
-import type { Service, User } from '../types';
+import { getActiveServices } from './services';
+import type { Service, User, Transaction } from './index';
 
 /* ─── Types ─── */
 interface CartItem { service: Service; quantity: number; }
