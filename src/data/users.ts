@@ -22,16 +22,6 @@ export const users: User[] = [
     created_at: '2024-01-01T08:00:00Z',
     account_status: 'ACTIVE'
   },
-  {
-    user_id: 'USR-00012',
-    full_name: 'Dr. Sinta Dewi',
-    username: 'Auditor',
-    password: '1234',
-    role: 'AUDITOR',
-    phone_number: '+62800-0000-0003',
-    created_at: '2024-01-01T08:00:00Z',
-    account_status: 'ACTIVE'
-  },
 ];
 
 export const getUserById = (userId: string): User | undefined => users.find(u => u.user_id === userId);

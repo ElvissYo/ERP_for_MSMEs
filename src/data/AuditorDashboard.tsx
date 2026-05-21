@@ -1,6 +1,7 @@
 import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import type { User } from './index';
+import FinancialStatements from './FinancialStatements';
 
 /* ─── IC Badge ─── */
 function ICBadge({ id, text }: { id: string; text: string }) {
@@ -59,7 +60,7 @@ export default function AuditorDashboard({ user: _user, activeTab: _activeTab }:
     transactions = [],
   } = useAppContext() || {};
 
-  const [tab, setTab] = useState<'journal' | 'audit' | 'trial' | 'anomaly'>('journal');
+  const [tab, setTab] = useState<'journal' | 'audit' | 'trial' | 'anomaly' | 'financials'>('journal');
   const [search, setSearch] = useState('');
 
   const trialBalance = useMemo(() => {
@@ -165,6 +166,9 @@ export default function AuditorDashboard({ user: _user, activeTab: _activeTab }:
           <TabBtn active={tab === 'trial'} onClick={() => setTab('trial')}>
             Trial Balance <ICBadge id="IC-7" text="Reconciliation Check" />
           </TabBtn>
+          <TabBtn active={tab === 'financials'} onClick={() => setTab('financials')}>
+            Financial Statements <ICBadge id="IC-9" text="Reporting" />
+          </TabBtn>
           <TabBtn active={tab === 'anomaly'} onClick={() => setTab('anomaly')}>
             Anomalies <span className="ml-1.5 text-[10px] bg-red-100 text-red-600 px-1.5 py-0.5 rounded-full font-bold">{anomalies.length}</span>
           </TabBtn>
@@ -261,6 +265,13 @@ export default function AuditorDashboard({ user: _user, activeTab: _activeTab }:
                 </tfoot>
               </table>
             </div>
+          </div>
+        )}
+
+        {/* ── Financial Statements Tab (Auditor View) ── */}
+        {tab === 'financials' && (
+          <div className="p-5">
+            <FinancialStatements journalEntries={journalEntries} entityName="Woyla Photocopy" showICBadge />
           </div>
         )}
 

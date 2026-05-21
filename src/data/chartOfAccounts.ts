@@ -3,7 +3,7 @@
 // Standar Akuntansi yang Realistis untuk UMKM
 // ============================================================================
 
-import { ChartOfAccount } from '../types';
+import type { ChartOfAccount } from '../types';
 
 export const chartOfAccounts: ChartOfAccount[] = [
   // ========== ASSETS (1000-1999) ==========
@@ -34,16 +34,16 @@ export const chartOfAccounts: ChartOfAccount[] = [
     is_active: true,
   },
   {
-    account_code: '1200',
-    account_name: 'Inventory - Raw Materials',
+    account_code: '1110',
+    account_name: 'Inventory',
     account_type: 'ASSET',
     account_category: 'CURRENT_ASSET',
     normal_balance: 'DEBIT',
     is_active: true,
   },
   {
-    account_code: '1210',
-    account_name: 'Inventory - Office Supplies',
+    account_code: '1200',
+    account_name: 'Office Supplies',
     account_type: 'ASSET',
     account_category: 'CURRENT_ASSET',
     normal_balance: 'DEBIT',
@@ -175,7 +175,7 @@ export const chartOfAccounts: ChartOfAccount[] = [
   },
   {
     account_code: '4010',
-    account_name: 'Service Revenue - Binding',
+    account_name: 'Service Revenue',
     account_type: 'REVENUE',
     account_category: 'OPERATING_REVENUE',
     normal_balance: 'CREDIT',
@@ -219,7 +219,23 @@ export const chartOfAccounts: ChartOfAccount[] = [
   // Cost of Goods Sold
   {
     account_code: '5000',
-    account_name: 'Cost of Goods Sold (COGS)',
+    account_name: 'Cost of Goods Sold',
+    account_type: 'EXPENSE',
+    account_category: 'OPERATING_EXPENSE',
+    normal_balance: 'DEBIT',
+    is_active: true,
+  },
+  {
+    account_code: '5010',
+    account_name: 'Operating Expense - General',
+    account_type: 'EXPENSE',
+    account_category: 'OPERATING_EXPENSE',
+    normal_balance: 'DEBIT',
+    is_active: true,
+  },
+  {
+    account_code: '5020',
+    account_name: 'Cost of Goods Sold - Materials',
     account_type: 'EXPENSE',
     account_category: 'OPERATING_EXPENSE',
     normal_balance: 'DEBIT',

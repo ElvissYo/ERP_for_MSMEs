@@ -6,6 +6,14 @@ import type { Service, User, Transaction } from './index';
 /* ─── Types ─── */
 interface CartItem { service: Service; quantity: number; }
 
+const getShiftStorageKey = (userId: string) => `woyla_erp_active_shift_start_${userId}`;
+
+const getDefaultShiftStart = () => {
+  const start = new Date();
+  start.setHours(0, 0, 0, 0);
+  return start.toISOString();
+};
+
 /* ─── IC Badge ─── */
 function ICBadge({ id, text }: { id: string; text: string }) {
   return (
@@ -26,6 +34,14 @@ const CAT_COLORS: Record<string, string> = {
   'Design & Editing': 'bg-indigo-50 text-indigo-700 border-indigo-200',
   'Other Services': 'bg-slate-100 text-slate-600 border-slate-200',
 };
+
+function getReceiptRevenueAccount(category: string) {
+  if (category === 'Printing' || category === 'Fotocopy') return '4000 - Service Revenue - Printing';
+  if (category === 'Binding') return '4010 - Service Revenue';
+  if (category === 'Laminating') return '4020 - Service Revenue - Laminating';
+  if (category === 'Photo Service') return '4030 - Service Revenue - Photo Service';
+  return '4040 - Service Revenue - Other';
+}
 
 function CatBadge({ cat }: { cat: string }) {
   const cls = CAT_COLORS[cat] || CAT_COLORS['Other Services'];
@@ -162,34 +178,48 @@ function VoidModal({ txn, onClose, onConfirm }: { txn: any; onClose: () => void;
 }
 
 /* ─── Close Shift Modal ─── */
-function CloseShiftModal({ user, onClose }: { user: User; onClose: () => void }) {
+function CloseShiftModal({
+  user,
+  shiftStart,
+  onClosed,
+  onClose,
+}: {
+  user: User;
+  shiftStart: string;
+  onClosed: (nextShiftStart: string) => void;
+  onClose: () => void;
+}) {
   const { transactions = [], closeShift } = useAppContext() || {};
   // const [actual, setActual] = useState(''); // Dihapus sesuai permintaan
   const [notes, setNotes] = useState('');
   const [done, setDone] = useState(false);
 
-  const today = new Date().toISOString().slice(0, 10);
-  const myTxns = transactions.filter(t =>
+  const shiftStartTime = new Date(shiftStart).getTime();
+  const shiftTxns = transactions.filter(t =>
     t.cashier_id === user.user_id &&
-    t.payment_method === 'CASH' &&
     t.payment_status === 'PAID' &&
-    t.transaction_date?.startsWith(today)
+    new Date(t.transaction_date).getTime() >= shiftStartTime
+  );
+  const myTxns = shiftTxns.filter(t =>
+    t.payment_method === 'CASH'
   );
   const expected = myTxns.reduce((s, t) => s + t.total_amount, 0);
   const actualNum = expected; // Asumsikan kas fisik = kas sistem
   const diff = 0; // Selisih selalu 0
 
   const handleSubmit = () => {
+    const closedAt = new Date().toISOString();
     closeShift?.({
       cashier_id: user.user_id,
-      start_time: `${today}T08:00:00Z`,
-      end_time: new Date().toISOString(),
+      start_time: shiftStart,
+      end_time: closedAt,
       expected_cash: expected,
       actual_cash: actualNum,
       cash_difference: diff,
-      transaction_count: myTxns.length,
+      transaction_count: shiftTxns.length,
       notes: notes || undefined,
     });
+    onClosed(closedAt);
     setDone(true);
   };
 
@@ -202,7 +232,9 @@ function CloseShiftModal({ user, onClose }: { user: User; onClose: () => void })
           </div>
           <h3 className="text-lg font-bold text-slate-800">Shift Closed Successfully</h3>
           <div className="bg-slate-50 rounded-xl p-4 text-left space-y-2 text-sm">
+            <div className="flex justify-between"><span className="text-slate-500">Transactions Closed</span><span className="font-bold">{shiftTxns.length}</span></div>
             <div className="flex justify-between"><span className="text-slate-500">System Cash</span><span className="font-bold">Rp {expected.toLocaleString('id-ID')}</span></div>
+            <div className="flex justify-between"><span className="text-slate-500">Shift Start</span><span className="font-bold">{new Date(shiftStart).toLocaleDateString('id-ID')}</span></div>
           </div>
           <button onClick={onClose} className="w-full py-2.5 bg-slate-900 text-white font-semibold rounded-xl text-sm">Close</button>
         </div>
@@ -220,7 +252,7 @@ function CloseShiftModal({ user, onClose }: { user: User; onClose: () => void })
             </div>
             <div>
               <h3 className="text-base font-bold text-slate-800">Close Shift / Close Register</h3>
-              <p className="text-xs text-slate-500">{user.full_name} · {today}</p>
+              <p className="text-xs text-slate-500">{user.full_name} · since {new Date(shiftStart).toLocaleString('id-ID')}</p>
             </div>
           </div>
           <ICBadge id="IC-6" text="Cash Reconciliation" />
@@ -228,8 +260,8 @@ function CloseShiftModal({ user, onClose }: { user: User; onClose: () => void })
 
         <div className="grid grid-cols-2 gap-3">
           <div className="bg-slate-50 rounded-xl p-3">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Today's Transactions</p>
-            <p className="text-lg font-bold text-slate-800">{myTxns.length}</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Active Shift Transactions</p>
+            <p className="text-lg font-bold text-slate-800">{shiftTxns.length}</p>
           </div>
           <div className="bg-slate-50 rounded-xl p-3">
             <p className="text-[10px] text-slate-500 uppercase tracking-wider">System Cash (Expected)</p>
@@ -256,14 +288,19 @@ function CloseShiftModal({ user, onClose }: { user: User; onClose: () => void })
 }
 
 /* ─── Main Cashier Dashboard ─── */
-export default function CashierDashboard({ user, activeTab, onNavigate }: { user: User; activeTab: string; onNavigate?: (tab: string) => void }) {
+export default function CashierDashboard({ user }: { user: User }) {
   const { addTransaction, voidTransaction, transactions = [] } = useAppContext() || {};
+  
   const activeServices = getActiveServices();
   const [cart, setCart] = useState<CartItem[]>([]);
   const [receipt, setReceipt] = useState<any>(null);
-  const [activeCat, setActiveCat] = useState('Semua');
+  const [activeCat, setActiveCat] = useState('All');
   const [voidTxn, setVoidTxn] = useState<Transaction | null>(null);
   const [showShift, setShowShift] = useState(false);
+  const [activeShiftStart, setActiveShiftStart] = useState(() => {
+    if (typeof window === 'undefined') return getDefaultShiftStart();
+    return window.localStorage.getItem(getShiftStorageKey(user.user_id)) || getDefaultShiftStart();
+  });
 
   const categories = ['All', ...Array.from(new Set(activeServices.map(s => s.category)))];
   const filtered = activeCat === 'All' ? activeServices : activeServices.filter(s => s.category === activeCat);
@@ -286,11 +323,19 @@ export default function CashierDashboard({ user, activeTab, onNavigate }: { user
   const itemCount = cart.reduce((s, c) => s + c.quantity, 0);
   const crossSell = useMemo(() => getCrossSell(cart), [cart]);
 
-  // Today's transactions for this cashier
-  const today = new Date().toISOString().slice(0, 10);
-  const myTodayTxns = transactions.filter(t =>
-    t.cashier_id === user.user_id && t.transaction_date?.startsWith(today) && t.payment_status === 'PAID'
+  const activeShiftStartTime = new Date(activeShiftStart).getTime();
+  const activeShiftTxns = transactions.filter(t =>
+    t.cashier_id === user.user_id &&
+    t.payment_status === 'PAID' &&
+    new Date(t.transaction_date).getTime() >= activeShiftStartTime
   );
+
+  const handleShiftClosed = (nextShiftStart: string) => {
+    setActiveShiftStart(nextShiftStart);
+    if (typeof window !== 'undefined') {
+      window.localStorage.setItem(getShiftStorageKey(user.user_id), nextShiftStart);
+    }
+  };
 
   const handleCheckout = () => {
     const now = new Date();
@@ -306,12 +351,24 @@ export default function CashierDashboard({ user, activeTab, onNavigate }: { user
       payment_method: 'CASH',
       payment_status: 'PAID',
       transaction_date: now.toISOString(),
+      cart_items: cart.map(item => ({
+        service_id: item.service.service_id,
+        quantity: item.quantity,
+        unit_price: item.service.unit_price,
+        service: item.service,
+      })),
     });
+
+    const revenueLines = cart.map(item => ({
+      account: getReceiptRevenueAccount(item.service.category),
+      debit: 0,
+      credit: item.service.unit_price * item.quantity,
+    }));
 
     const entries = [
       { account: '1010 - Cash', debit: total, credit: 0 },
-      { account: `4000 - Service Revenue`, debit: 0, credit: subtotal },
-      { account: '2100 - Tax Payable - PPN (VAT)', debit: 0, credit: tax },
+      ...revenueLines,
+      { account: '2100 - Tax Payable (PPN)', debit: 0, credit: tax },
     ];
 
     setReceipt({
@@ -330,10 +387,9 @@ export default function CashierDashboard({ user, activeTab, onNavigate }: { user
     }
   };
 
-  if (activeTab === 'shift' || showShift) {
-    return <CloseShiftModal user={user} onClose={() => {
+  if (showShift) {
+    return <CloseShiftModal user={user} shiftStart={activeShiftStart} onClosed={handleShiftClosed} onClose={() => {
       setShowShift(false);
-      if (activeTab === 'shift' && onNavigate) onNavigate('pos');
     }} />;
   }
 
@@ -346,18 +402,30 @@ export default function CashierDashboard({ user, activeTab, onNavigate }: { user
         {/* Stats bar */}
         <div className="grid grid-cols-3 gap-3 shrink-0">
           <div className="bg-white border border-slate-200 rounded-xl p-3">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Today's Transactions</p>
-            <p className="text-lg font-bold text-slate-800">{myTodayTxns.length}</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Active Shift Transactions</p>
+            <p className="text-lg font-bold text-slate-800">{activeShiftTxns.length}</p>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-3">
-            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Today's Revenue</p>
-            <p className="text-lg font-bold text-emerald-700">Rp {myTodayTxns.reduce((s, t) => s + t.total_amount, 0).toLocaleString('id-ID')}</p>
+            <p className="text-[10px] text-slate-500 uppercase tracking-wider">Active Shift Revenue</p>
+            <p className="text-lg font-bold text-emerald-700">Rp {activeShiftTxns.reduce((s, t) => s + t.total_amount, 0).toLocaleString('id-ID')}</p>
           </div>
           <div className="bg-white border border-slate-200 rounded-xl p-3">
             <p className="text-[10px] text-slate-500 uppercase tracking-wider">Status</p>
-            <div className="flex items-center gap-1.5 mt-1">
-              <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
+            <div className="mt-1 flex items-center justify-between gap-2">
+              <div className="flex items-center gap-1.5">
+                <span className="w-2 h-2 bg-emerald-500 rounded-full animate-pulse" />
                 <span className="text-xs font-bold text-slate-700">Active Shift</span>
+              </div>
+              <button
+                type="button"
+                onClick={() => setShowShift(true)}
+                className="inline-flex items-center gap-1.5 rounded-lg bg-slate-900 px-2.5 py-1.5 text-[10px] font-bold text-white transition-colors hover:bg-slate-800"
+              >
+                <svg className="h-3.5 w-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                  <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 8v4l3 3m6-3a9 9 0 11-18 0 9 9 0 0118 0z" />
+                </svg>
+                Close Shift
+              </button>
             </div>
           </div>
         </div>
@@ -400,16 +468,16 @@ export default function CashierDashboard({ user, activeTab, onNavigate }: { user
         {/* Recent transactions + Void */}
         <div className="bg-white border border-slate-200 rounded-xl overflow-hidden shrink-0">
           <div className="px-4 py-3 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Today's Transaction History</h3>
+            <h3 className="text-xs font-bold text-slate-700 uppercase tracking-wider">Active Shift Transaction History</h3>
             <ICBadge id="IC-4" text="Threshold Authorization" />
           </div>
           <div className="max-h-40 overflow-y-auto">
-            {myTodayTxns.length === 0 ? (
-              <div className="px-4 py-6 text-center text-xs text-slate-400">No transactions today</div>
+            {activeShiftTxns.length === 0 ? (
+              <div className="px-4 py-6 text-center text-xs text-slate-400">No transactions in current shift</div>
             ) : (
               <table className="w-full text-xs">
                 <tbody className="divide-y divide-slate-100">
-                  {myTodayTxns.slice().reverse().map(t => (
+                  {activeShiftTxns.slice().sort((a, b) => new Date(b.transaction_date).getTime() - new Date(a.transaction_date).getTime()).map(t => (
                     <tr key={t.transaction_id} className="hover:bg-slate-50">
                       <td className="px-4 py-2 font-mono text-slate-500">{t.transaction_id}</td>
                       <td className="px-4 py-2 text-slate-600">{new Date(t.transaction_date).toLocaleTimeString('id-ID', { hour: '2-digit', minute: '2-digit' })}</td>

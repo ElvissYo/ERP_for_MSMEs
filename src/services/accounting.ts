@@ -9,8 +9,8 @@ type AccountMapping = {
 
 export const defaultAccountMapping: AccountMapping = {
   cash: '1010 - Cash',
-  cashInBank: '1020 - Cash in Bank (QRIS)',
-  taxPayable: '2010 - Tax Payable (PPN)',
+  cashInBank: '1020 - Cash in Bank',
+  taxPayable: '2100 - Tax Payable (PPN)',
   revenue: '4010 - Service Revenue',
 };
 

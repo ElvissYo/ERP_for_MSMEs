@@ -4,7 +4,7 @@
 // ============================================================================
 
 // Base Types
-export type UserRole = 'CASHIER' | 'OWNER' | 'AUDITOR';
+export type UserRole = 'CASHIER' | 'OWNER';
 export type AccountStatus = 'ACTIVE' | 'INACTIVE' | 'SUSPENDED';
 export type PaymentMethod = 'CASH' | 'QRIS' | 'DEBIT';
 export type PaymentStatus = 'PAID' | 'PENDING' | 'FAILED' | 'VOIDED';
