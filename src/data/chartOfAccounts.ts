@@ -206,6 +206,14 @@ export const chartOfAccounts: ChartOfAccount[] = [
     is_active: true,
   },
   {
+    account_code: '4050',
+    account_name: 'Product Sales Revenue',
+    account_type: 'REVENUE',
+    account_category: 'OPERATING_REVENUE',
+    normal_balance: 'CREDIT',
+    is_active: true,
+  },
+  {
     account_code: '4900',
     account_name: 'Other Income',
     account_type: 'REVENUE',

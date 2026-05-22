@@ -353,11 +353,11 @@ export default function FinanceWorkspace({
             <div className="p-5 space-y-3">
               {[
                 ['1', 'Module authorization', 'Cashier starts in Sales access, while owner modules require password authorization before opening.'],
-                ['2', 'Sales input', 'Cashier selects service, quantity, and payment. System validates totals and PPN 11%.'],
+                ['2', 'Sales input', 'Cashier selects product and service items in one cart. System validates totals and PPN 11%.'],
                 ['3', 'Automatic posting', 'System posts cash or bank debit, revenue credit, tax payable credit, COGS debit, and inventory credit.'],
                 ['4', 'Procurement cycle', 'Low stock triggers PO, goods receipt records inventory and AP, payment clears AP and cash.'],
-                ['5', 'Expense approval', 'Expense is submitted, Owner approves or rejects, approved expense becomes a journal entry.'],
-                ['6', 'Close shift', 'Cashier closes register and system logs expected cash for reconciliation.'],
+                ['5', 'General journal', 'Owner records electricity, rent, salary, parking, and other non-stock operating costs directly in the journal.'],
+                ['6', 'Close register', 'Cashier closes register inside Sales and system logs expected cash for reconciliation.'],
                 ['7', 'Ledger and trial balance', 'Journal entries are posted into ledger accounts and summarized in trial balance.'],
                 ['8', 'Financial reports', 'Owner reviews income statement, balance sheet, and cash flow for decisions.'],
               ].map(([step, title, body]) => (

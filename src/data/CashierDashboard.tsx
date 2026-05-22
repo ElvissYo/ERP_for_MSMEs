@@ -1,10 +1,14 @@
 import { useState, useMemo } from 'react';
 import { useAppContext } from '../context/AppContext';
 import { getActiveServices } from './services';
-import type { Service, User, Transaction } from './index';
+import type { Inventory, Service, User, Transaction } from './index';
 
 /* ─── Types ─── */
-interface CartItem { service: Service; quantity: number; }
+type CatalogItem =
+  | { type: 'SERVICE'; id: string; name: string; category: string; unit_price: number; service: Service }
+  | { type: 'PRODUCT'; id: string; name: string; category: string; unit_price: number; inventory: Inventory };
+
+type CartItem = CatalogItem & { quantity: number };
 
 const getShiftStorageKey = (userId: string) => `woyla_erp_active_shift_start_${userId}`;
 
@@ -32,10 +36,12 @@ const CAT_COLORS: Record<string, string> = {
   Scanning: 'bg-sky-50 text-sky-700 border-sky-200',
   'Photo Service': 'bg-rose-50 text-rose-700 border-rose-200',
   'Design & Editing': 'bg-indigo-50 text-indigo-700 border-indigo-200',
+  Product: 'bg-teal-50 text-teal-700 border-teal-200',
   'Other Services': 'bg-slate-100 text-slate-600 border-slate-200',
 };
 
 function getReceiptRevenueAccount(category: string) {
+  if (category === 'Product') return '4050 - Product Sales Revenue';
   if (category === 'Printing' || category === 'Fotocopy') return '4000 - Service Revenue - Printing';
   if (category === 'Binding') return '4010 - Service Revenue';
   if (category === 'Laminating') return '4020 - Service Revenue - Laminating';
@@ -48,15 +54,24 @@ function CatBadge({ cat }: { cat: string }) {
   return <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${cls}`}>{cat}</span>;
 }
 
+const SELLABLE_PRODUCT_CATEGORIES = new Set(['Office Supplies', 'Paper', 'Binding Supplies']);
+
+const getProductSalePrice = (item: Inventory) => {
+  const markedUp = item.unit_cost * 1.35;
+  return Math.ceil(markedUp / 500) * 500;
+};
+
+const getLineKey = (item: Pick<CatalogItem, 'type' | 'id'>) => `${item.type}-${item.id}`;
+
 /* ─── Cross-sell engine ─── */
 function getCrossSell(cart: CartItem[]): { show: boolean; message: string } {
-  const printQty = cart.filter(c => c.service.category === 'Printing').reduce((s, c) => s + c.quantity, 0);
-  const hasBinding = cart.some(c => c.service.category === 'Binding');
-  const hasLaminating = cart.some(c => c.service.category === 'Laminating');
+  const printQty = cart.filter(c => c.type === 'SERVICE' && c.category === 'Printing').reduce((s, c) => s + c.quantity, 0);
+  const hasBinding = cart.some(c => c.type === 'SERVICE' && c.category === 'Binding');
+  const hasLaminating = cart.some(c => c.type === 'SERVICE' && c.category === 'Laminating');
   if (printQty >= 50 && !hasBinding && !hasLaminating) {
     return { show: true, message: `Customer printed ${printQty} sheets. Recommendation: Spiral Binding / Laminating` };
   }
-  const photoQty = cart.filter(c => c.service.category === 'Photo Service').reduce((s, c) => s + c.quantity, 0);
+  const photoQty = cart.filter(c => c.type === 'SERVICE' && c.category === 'Photo Service').reduce((s, c) => s + c.quantity, 0);
   if (photoQty >= 5 && !hasLaminating) {
     return { show: true, message: `Customer printed ${photoQty} photos. Recommendation: ID Card Laminating` };
   }
@@ -289,7 +304,7 @@ function CloseShiftModal({
 
 /* ─── Main Cashier Dashboard ─── */
 export default function CashierDashboard({ user }: { user: User }) {
-  const { addTransaction, voidTransaction, transactions = [] } = useAppContext() || {};
+  const { addTransaction, voidTransaction, transactions = [], inventory = [] } = useAppContext() || {};
   
   const activeServices = getActiveServices();
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -302,22 +317,50 @@ export default function CashierDashboard({ user }: { user: User }) {
     return window.localStorage.getItem(getShiftStorageKey(user.user_id)) || getDefaultShiftStart();
   });
 
-  const categories = ['All', ...Array.from(new Set(activeServices.map(s => s.category)))];
-  const filtered = activeCat === 'All' ? activeServices : activeServices.filter(s => s.category === activeCat);
+  const productCatalog = useMemo<CatalogItem[]>(
+    () => inventory
+      .filter(item => SELLABLE_PRODUCT_CATEGORIES.has(item.category) && item.stock > 0)
+      .map(item => ({
+        type: 'PRODUCT' as const,
+        id: item.inventory_id,
+        name: item.item_name,
+        category: 'Product',
+        unit_price: getProductSalePrice(item),
+        inventory: item,
+      })),
+    [inventory],
+  );
+  const serviceCatalog = useMemo<CatalogItem[]>(
+    () => activeServices.map(service => ({
+      type: 'SERVICE' as const,
+      id: service.service_id,
+      name: service.service_name,
+      category: service.category,
+      unit_price: service.unit_price,
+      service,
+    })),
+    [activeServices],
+  );
+  const catalog = useMemo(() => [...serviceCatalog, ...productCatalog], [serviceCatalog, productCatalog]);
+  const categories = ['All', 'Product', ...Array.from(new Set(activeServices.map(s => s.category)))];
+  const filtered = activeCat === 'All'
+    ? catalog
+    : catalog.filter(item => activeCat === 'Product' ? item.type === 'PRODUCT' : item.type === 'SERVICE' && item.category === activeCat);
 
-  const addToCart = (svc: Service) => {
+  const addToCart = (catalogItem: CatalogItem) => {
     setCart(prev => {
-      const ex = prev.find(c => c.service.service_id === svc.service_id);
-      if (ex) return prev.map(c => c.service.service_id === svc.service_id ? { ...c, quantity: c.quantity + 1 } : c);
-      return [...prev, { service: svc, quantity: 1 }];
+      const key = getLineKey(catalogItem);
+      const ex = prev.find(c => getLineKey(c) === key);
+      if (ex) return prev.map(c => getLineKey(c) === key ? { ...c, quantity: c.quantity + 1 } : c);
+      return [...prev, { ...catalogItem, quantity: 1 }];
     });
   };
-  const decQty = (sid: string) => {
-    setCart(prev => prev.map(c => c.service.service_id === sid ? { ...c, quantity: c.quantity - 1 } : c).filter(c => c.quantity > 0));
+  const decQty = (key: string) => {
+    setCart(prev => prev.map(c => getLineKey(c) === key ? { ...c, quantity: c.quantity - 1 } : c).filter(c => c.quantity > 0));
   };
-  const remove = (sid: string) => setCart(prev => prev.filter(c => c.service.service_id !== sid));
+  const remove = (key: string) => setCart(prev => prev.filter(c => getLineKey(c) !== key));
 
-  const subtotal = cart.reduce((s, c) => s + c.service.unit_price * c.quantity, 0);
+  const subtotal = cart.reduce((s, c) => s + c.unit_price * c.quantity, 0);
   const tax = Math.round(subtotal * 0.11);
   const total = subtotal + tax;
   const itemCount = cart.reduce((s, c) => s + c.quantity, 0);
@@ -340,10 +383,11 @@ export default function CashierDashboard({ user }: { user: User }) {
   const handleCheckout = () => {
     const now = new Date();
     const txnId = `TXN-${Date.now()}`;
+    const primaryService = cart.find(item => item.type === 'SERVICE');
     addTransaction({
       transaction_id: txnId,
       cashier_id: user.user_id,
-      service_id: cart[0].service.service_id,
+      service_id: primaryService?.id ?? 'PRODUCT-SALE',
       quantity: itemCount,
       subtotal,
       tax_amount: tax,
@@ -351,18 +395,30 @@ export default function CashierDashboard({ user }: { user: User }) {
       payment_method: 'CASH',
       payment_status: 'PAID',
       transaction_date: now.toISOString(),
-      cart_items: cart.map(item => ({
-        service_id: item.service.service_id,
-        quantity: item.quantity,
-        unit_price: item.service.unit_price,
-        service: item.service,
-      })),
+      cart_items: cart.map(item => item.type === 'SERVICE'
+        ? {
+            item_type: 'SERVICE' as const,
+            service_id: item.id,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            service: item.service,
+          }
+        : {
+            item_type: 'PRODUCT' as const,
+            product_id: item.id,
+            inventory_id: item.id,
+            item_name: item.name,
+            quantity: item.quantity,
+            unit_price: item.unit_price,
+            unit_cost: item.inventory.unit_cost,
+            inventory: item.inventory,
+          }),
     });
 
     const revenueLines = cart.map(item => ({
-      account: getReceiptRevenueAccount(item.service.category),
+      account: getReceiptRevenueAccount(item.category),
       debit: 0,
-      credit: item.service.unit_price * item.quantity,
+      credit: item.unit_price * item.quantity,
     }));
 
     const entries = [
@@ -448,19 +504,20 @@ export default function CashierDashboard({ user }: { user: User }) {
           ))}
         </div>
 
-        {/* Service grid */}
+        {/* Catalog grid */}
         <div className="grid grid-cols-2 xl:grid-cols-4 gap-3 overflow-y-auto pb-2 pr-1">
-          {filtered.map(svc => (
-            <button key={svc.service_id} onClick={() => addToCart(svc)}
+          {filtered.map(item => (
+            <button key={getLineKey(item)} onClick={() => addToCart(item)}
               className="bg-white border border-slate-200 rounded-xl p-3 text-left hover:border-violet-300 hover:shadow-sm transition-all group flex flex-col h-full">
               <div className="flex items-start justify-between mb-2">
-                <CatBadge cat={svc.category} />
+                <CatBadge cat={item.category} />
                 <div className="w-6 h-6 rounded bg-slate-100 group-hover:bg-violet-100 flex items-center justify-center transition-colors">
                   <svg className="w-3 h-3 text-slate-400 group-hover:text-violet-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M12 4v16m8-8H4" /></svg>
                 </div>
               </div>
-              <p className="text-xs font-semibold text-slate-800 leading-snug flex-1">{svc.service_name}</p>
-              <p className="text-sm font-bold text-violet-700 mt-1.5">Rp {svc.unit_price.toLocaleString('id-ID')}<span className="text-[10px] font-normal text-slate-400">/unit</span></p>
+              <p className="text-xs font-semibold text-slate-800 leading-snug flex-1">{item.name}</p>
+              {item.type === 'PRODUCT' && <p className="text-[10px] text-slate-400 mt-1">Stock {item.inventory.stock}</p>}
+              <p className="text-sm font-bold text-violet-700 mt-1.5">Rp {item.unit_price.toLocaleString('id-ID')}<span className="text-[10px] font-normal text-slate-400">/unit</span></p>
             </button>
           ))}
         </div>
@@ -523,20 +580,23 @@ export default function CashierDashboard({ user }: { user: User }) {
             </div>
           ) : (
             cart.map(item => (
-              <div key={item.service.service_id} className="bg-slate-50 rounded-xl p-3">
+              <div key={getLineKey(item)} className="bg-slate-50 rounded-xl p-3">
                 <div className="flex items-start justify-between gap-2">
-                  <p className="text-xs font-semibold text-slate-700 flex-1 leading-snug">{item.service.service_name}</p>
-                  <button onClick={() => remove(item.service.service_id)} className="text-slate-300 hover:text-red-400 transition-colors shrink-0">
+                  <div className="flex-1 min-w-0">
+                    <p className="text-xs font-semibold text-slate-700 leading-snug">{item.name}</p>
+                    <p className="text-[10px] text-slate-400 mt-0.5">{item.type === 'PRODUCT' ? 'Product' : item.category}</p>
+                  </div>
+                  <button onClick={() => remove(getLineKey(item))} className="text-slate-300 hover:text-red-400 transition-colors shrink-0">
                     <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2} d="M6 18L18 6M6 6l12 12" /></svg>
                   </button>
                 </div>
                 <div className="flex items-center justify-between mt-2">
                   <div className="flex items-center gap-1.5">
-                    <button onClick={() => decQty(item.service.service_id)} className="w-5 h-5 rounded bg-white border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 text-xs font-bold">−</button>
+                    <button onClick={() => decQty(getLineKey(item))} className="w-5 h-5 rounded bg-white border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 text-xs font-bold">−</button>
                     <span className="text-xs font-bold text-slate-700 w-4 text-center">{item.quantity}</span>
-                    <button onClick={() => addToCart(item.service)} className="w-5 h-5 rounded bg-white border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 text-xs font-bold">+</button>
+                    <button onClick={() => addToCart(item)} className="w-5 h-5 rounded bg-white border border-slate-200 flex items-center justify-center text-slate-500 hover:bg-slate-100 text-xs font-bold">+</button>
                   </div>
-                  <p className="text-xs font-bold text-violet-700">Rp {(item.service.unit_price * item.quantity).toLocaleString('id-ID')}</p>
+                  <p className="text-xs font-bold text-violet-700">Rp {(item.unit_price * item.quantity).toLocaleString('id-ID')}</p>
                 </div>
               </div>
             ))

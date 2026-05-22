@@ -12,6 +12,7 @@ export type ServiceStatus = 'ACTIVE' | 'INACTIVE';
 export type InventoryStatus = 'NORMAL' | 'LOW_STOCK' | 'OUT_OF_STOCK';
 export type ApprovalStatus = 'PENDING' | 'APPROVED' | 'REJECTED';
 export type PurchaseOrderStatus = 'DRAFT' | 'AWAITING_DELIVERY' | 'RECEIVED' | 'PAID';
+export type TransactionItemType = 'SERVICE' | 'PRODUCT';
 
 export type AuditAction = 
   | 'LOGIN' 
@@ -22,6 +23,7 @@ export type AuditAction =
   | 'APPROVE_EXPENSE'
   | 'REJECT_EXPENSE'
   | 'CREATE_EXPENSE'
+  | 'CREATE_GENERAL_JOURNAL'
   | 'VIEW_REPORT'
   | 'EXPORT_DATA'
   | 'GENERATE_PO'
@@ -92,6 +94,19 @@ export interface Inventory {
   last_restock_date: string;
 }
 
+export interface TransactionLineItem {
+  item_type: TransactionItemType;
+  service_id?: string;
+  product_id?: string;
+  inventory_id?: string;
+  item_name?: string;
+  quantity: number;
+  unit_price?: number;
+  unit_cost?: number;
+  service?: Service;
+  inventory?: Inventory;
+}
+
 // Transaction Interface (Enhanced)
 export interface Transaction {
   transaction_id: string;
@@ -104,6 +119,8 @@ export interface Transaction {
   payment_method: PaymentMethod;
   payment_status: PaymentStatus;
   transaction_date: string;
+  items?: TransactionLineItem[];
+  cart_items?: TransactionLineItem[];
   voided_by?: string;
   voided_at?: string;
   void_reason?: string;

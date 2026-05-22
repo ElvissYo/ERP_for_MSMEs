@@ -1,9 +1,8 @@
-import { useState, useMemo } from 'react';
+import { useState, useMemo, type FormEvent } from 'react';
 import { useAppContext } from '../context/AppContext';
 import type { User, Inventory } from './index';
 import FinanceWorkspace from './FinanceWorkspace';
 import { services } from './services';
-import { getUserById } from './users';
 
 /* ─── IC Badge ─── */
 function ICBadge({ id, text }: { id: string; text: string }) {
@@ -38,6 +37,18 @@ type InvoiceSnapshot = {
 
 const INVOICE_SNAPSHOT_KEY = 'woyla_erp_invoice_snapshots';
 
+const OPERATING_EXPENSE_ACCOUNTS = [
+  '5010 - Operating Expense - General',
+  '5100 - Salaries & Wages',
+  '5200 - Rent Expense',
+  '5300 - Utilities Expense',
+  '5400 - Maintenance & Repairs',
+  '5600 - Office Supplies Expense',
+  '5900 - Miscellaneous Expense',
+];
+
+const PAYMENT_ACCOUNTS = ['1010 - Cash', '1020 - Cash in Bank'];
+
 const getCategoryLabel = (serviceId: string) => {
   const service = services.find(svc => svc.service_id === serviceId);
   if (!service) return 'Other';
@@ -71,15 +82,24 @@ const getTransactionLines = (txn: any) => {
   const rawItems = txn.cart_items ?? txn.items;
   if (Array.isArray(rawItems) && rawItems.length > 0) {
     return rawItems
-      .map((item: any) => ({
-        service_id: item.service_id ?? item.service?.service_id,
-        quantity: Number(item.quantity || 1),
-        unit_price: Number(item.unit_price ?? item.service?.unit_price ?? 0),
-      }))
-      .filter((line: any) => line.service_id && line.quantity > 0);
+      .map((item: any) => {
+        const inventoryId = item.inventory_id ?? item.product_id ?? item.inventory?.inventory_id;
+        const serviceId = item.service_id ?? item.service?.service_id;
+        return {
+          item_type: item.item_type ?? (inventoryId ? 'PRODUCT' : 'SERVICE'),
+          service_id: serviceId,
+          inventory_id: inventoryId,
+          product_id: item.product_id ?? inventoryId,
+          item_name: item.item_name ?? item.inventory?.item_name,
+          quantity: Number(item.quantity || 1),
+          unit_price: Number(item.unit_price ?? item.service?.unit_price ?? 0),
+          unit_cost: Number(item.unit_cost ?? item.inventory?.unit_cost ?? 0),
+        };
+      })
+      .filter((line: any) => line.quantity > 0 && (line.service_id || line.inventory_id || line.product_id));
   }
 
-  return [{ service_id: txn.service_id, quantity: Number(txn.quantity || 1), unit_price: 0 }];
+  return [{ item_type: 'SERVICE', service_id: txn.service_id, quantity: Number(txn.quantity || 1), unit_price: 0 }];
 };
 
 const xmlEscape = (value: string) =>
@@ -145,7 +165,7 @@ function POModal({ item, createdBy, onClose, onGenerate }: { item: Inventory; cr
     <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-2xl shadow-2xl w-full max-w-md p-6 space-y-4">
         <div className="flex items-center justify-between">
-          <h3 className="text-base font-bold text-slate-800">Create Purchase Order</h3>
+          <h3 className="text-base font-bold text-slate-800">Stock Request / Purchase Order</h3>
           <ICBadge id="IC-4" text="Threshold Authorization" />
         </div>
         <div className="bg-slate-50 rounded-xl p-3 text-sm">
@@ -169,7 +189,7 @@ function POModal({ item, createdBy, onClose, onGenerate }: { item: Inventory; cr
         <div className="flex gap-2">
           <button onClick={onClose} className="flex-1 py-2.5 bg-slate-100 hover:bg-slate-200 text-slate-700 text-sm font-semibold rounded-xl">Cancel</button>
           <button onClick={() => { onGenerate({ supplier_name: supplier, items: [{ inventory_id: item.inventory_id, item_name: item.item_name, quantity: qty, unit_cost: item.unit_cost, subtotal: qty * item.unit_cost }], total_amount: qty * item.unit_cost, created_by: createdBy }); onClose(); }}
-            className="flex-1 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold rounded-xl">Generate PO</button>
+            className="flex-1 py-2.5 bg-violet-600 hover:bg-violet-700 text-white text-sm font-semibold rounded-xl">Create PO</button>
         </div>
       </div>
     </div>
@@ -177,6 +197,89 @@ function POModal({ item, createdBy, onClose, onGenerate }: { item: Inventory; cr
 }
 
 /* ─── Supplier Invoice Modal ─── */
+function GeneralJournalPanel({
+  latestEntries,
+  onPost,
+}: {
+  latestEntries: any[];
+  onPost: (entry: { description: string; debitAccount: string; creditAccount: string; amount: number }) => void;
+}) {
+  const [description, setDescription] = useState('Electricity bill');
+  const [debitAccount, setDebitAccount] = useState('5300 - Utilities Expense');
+  const [creditAccount, setCreditAccount] = useState('1010 - Cash');
+  const [amount, setAmount] = useState('250000');
+
+  const handleSubmit = (event: FormEvent) => {
+    event.preventDefault();
+    const parsedAmount = Number(amount);
+    if (!description.trim() || parsedAmount <= 0) return;
+
+    onPost({
+      description: description.trim(),
+      debitAccount,
+      creditAccount,
+      amount: parsedAmount,
+    });
+    setDescription('');
+    setAmount('');
+  };
+
+  return (
+    <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
+      <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
+        <h3 className="text-sm font-bold text-slate-700">General Journal Entry</h3>
+        <ICBadge id="IC-2" text="Double Entry Control" />
+      </div>
+      <form onSubmit={handleSubmit} className="p-5 space-y-3">
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Description</label>
+          <input value={description} onChange={e => setDescription(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-400 outline-none" />
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-slate-500 mb-1">Debit Account</label>
+          <select value={debitAccount} onChange={e => setDebitAccount(e.target.value)}
+            className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-400 outline-none">
+            {OPERATING_EXPENSE_ACCOUNTS.map(account => <option key={account} value={account}>{account}</option>)}
+          </select>
+        </div>
+        <div className="grid grid-cols-2 gap-2">
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Paid From</label>
+            <select value={creditAccount} onChange={e => setCreditAccount(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-400 outline-none">
+              {PAYMENT_ACCOUNTS.map(account => <option key={account} value={account}>{account}</option>)}
+            </select>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-slate-500 mb-1">Amount</label>
+            <input type="number" min={1} value={amount} onChange={e => setAmount(e.target.value)}
+              className="w-full px-3 py-2 bg-slate-50 border border-slate-200 rounded-lg text-sm focus:ring-2 focus:ring-violet-400 outline-none" />
+          </div>
+        </div>
+        <button type="submit"
+          className="w-full py-2.5 bg-slate-900 hover:bg-slate-800 text-white text-sm font-semibold rounded-xl transition-colors">
+          Post Journal Entry
+        </button>
+      </form>
+      <div className="border-t border-slate-100 divide-y divide-slate-100 max-h-36 overflow-y-auto">
+        {latestEntries.length === 0 && <div className="px-5 py-5 text-center text-xs text-slate-400">No operating cost journal yet</div>}
+        {latestEntries.map(entry => (
+          <div key={entry.journal_id} className="px-5 py-3">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-xs font-semibold text-slate-700 truncate">{entry.description}</p>
+                <p className="text-[10px] text-slate-400">{entry.debit_account} / {entry.credit_account}</p>
+              </div>
+              <p className="text-xs font-bold text-slate-900 shrink-0">Rp {entry.amount.toLocaleString('id-ID')}</p>
+            </div>
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function InvoiceModal({ po, snapshot, onClose }: { po: any; snapshot?: InvoiceSnapshot; onClose: () => void }) {
   const history = [
     { label: 'PO Created', time: po.created_at, status: 'CREATED' },
@@ -264,17 +367,15 @@ function InvoiceModal({ po, snapshot, onClose }: { po: any; snapshot?: InvoiceSn
 /* ─── Main Owner Dashboard ─── */
 export default function OwnerDashboard({ user, activeTab }: { user: User; activeTab: string }) {
   const {
-    transactions = [], journalEntries = [], inventory = [], expenses = [], purchaseOrders = [],
-    approveExpense, rejectExpense, generatePO, receiveGoods, payBill, getDemandForecasts,
+    transactions = [], journalEntries = [], inventory = [], purchaseOrders = [],
+    addJournalEntries, pushAudit, generatePO, receiveGoods, payBill, getDemandForecasts,
   } = useAppContext() || {};
 
   const [poModalItem, setPoModalItem] = useState<Inventory | null>(null);
-  const [approvingId, setApprovingId] = useState<string | null>(null);
   const [invoiceModalItem, setInvoiceModalItem] = useState<any | null>(null);
   const [invoiceSnapshots, setInvoiceSnapshots] = useState<Record<string, InvoiceSnapshot>>(() => loadInvoiceSnapshots());
   const [poSort, setPoSort] = useState<'newest' | 'oldest' | 'amount'>('newest');
   const [txnSort, setTxnSort] = useState<'newest' | 'oldest' | 'amount'>('newest');
-  const [expenseSort, setExpenseSort] = useState<'newest' | 'oldest' | 'amount'>('newest');
 
   const openInvoice = (po: any) => {
     const current = invoiceSnapshots[po.po_id];
@@ -299,9 +400,8 @@ export default function OwnerDashboard({ user, activeTab }: { user: User; active
   const totalTax = paidTxns.reduce((s, t) => s + t.tax_amount, 0);
   const totalCogs = journalEntries.filter(j => j.entry_type === 'COGS').reduce((s, j) => s + j.amount, 0);
   const netRevenue = grossRevenue - totalCogs;
-  const approvedExp = expenses.filter(e => e.approval_status === 'APPROVED');
-  const totalExp = approvedExp.reduce((s, e) => s + e.amount, 0);
-  const pendingExp = expenses.filter(e => e.approval_status === 'PENDING');
+  const operatingExpenseEntries = journalEntries.filter(j => j.entry_type === 'EXPENSE' && /^[56]/.test(j.debit_account));
+  const totalOperatingExpenses = operatingExpenseEntries.reduce((s, j) => s + j.amount, 0);
   const lowStock = inventory.filter(i => i.stock < i.reorder_point);
   const forecasts = getDemandForecasts ? getDemandForecasts() : [];
 
@@ -317,14 +417,18 @@ export default function OwnerDashboard({ user, activeTab }: { user: User; active
       }, 0);
 
       lines.forEach((line: any) => {
-        const category = getCategoryLabel(line.service_id);
+        const isProductLine = line.item_type === 'PRODUCT';
+        const category = isProductLine ? 'Product' : getCategoryLabel(line.service_id);
         const service = services.find(svc => svc.service_id === line.service_id);
         const lineUnitPrice = line.unit_price || service?.unit_price || 0;
         const lineRevenue = lineBase > 0 ? subtotal * ((lineUnitPrice * line.quantity) / lineBase) : subtotal;
+        const productCost = isProductLine
+          ? (line.unit_cost || inventory.find(item => item.inventory_id === line.inventory_id || item.inventory_id === line.product_id)?.unit_cost || 0) * line.quantity
+          : 0;
 
         if (!map[category]) map[category] = { revenue: 0, cogs: 0 };
         map[category].revenue += lineRevenue;
-        map[category].cogs += getServiceMaterialCost(line.service_id, line.quantity, inventory);
+        map[category].cogs += isProductLine ? productCost : getServiceMaterialCost(line.service_id, line.quantity, inventory);
       });
     });
 
@@ -355,17 +459,37 @@ export default function OwnerDashboard({ user, activeTab }: { user: User; active
     });
   }, [transactions, txnSort]);
 
-  const sortedPendingExpenses = useMemo(() => {
-    return pendingExp.slice().sort((a, b) => {
-      if (expenseSort === 'amount') return b.amount - a.amount;
-      const diff = new Date(a.expense_date).getTime() - new Date(b.expense_date).getTime();
-      return expenseSort === 'oldest' ? diff : -diff;
-    });
-  }, [pendingExp, expenseSort]);
+  const latestOperatingExpenseEntries = useMemo(() => {
+    return operatingExpenseEntries
+      .slice()
+      .sort((a, b) => new Date(b.entry_date).getTime() - new Date(a.entry_date).getTime())
+      .slice(0, 4);
+  }, [operatingExpenseEntries]);
 
-  const sortedApprovedExpenses = useMemo(() => {
-    return approvedExp.slice().sort((a, b) => new Date(b.expense_date).getTime() - new Date(a.expense_date).getTime());
-  }, [approvedExp]);
+  const handlePostGeneralJournal = (entry: { description: string; debitAccount: string; creditAccount: string; amount: number }) => {
+    const now = new Date().toISOString();
+    const ref = `GJ-${Date.now()}`;
+
+    addJournalEntries?.([{
+      journal_id: `JRN-GJ-${Date.now()}`,
+      transaction_ref: ref,
+      debit_account: entry.debitAccount,
+      credit_account: entry.creditAccount,
+      amount: entry.amount,
+      description: entry.description,
+      created_by: user.user_id,
+      entry_date: now,
+      entry_type: 'EXPENSE',
+    }]);
+
+    pushAudit?.({
+      userId: user.user_id,
+      action: 'CREATE_GENERAL_JOURNAL',
+      module: 'ACCOUNTING',
+      targetId: ref,
+      details: `General journal posted for Rp ${entry.amount.toLocaleString('id-ID')}`,
+    });
+  };
 
   /* ─── Procurement Tab ─── */
   if (activeTab === 'procurement') {
@@ -374,6 +498,14 @@ export default function OwnerDashboard({ user, activeTab }: { user: User; active
         <div className="flex items-center justify-between">
           <h2 className="text-lg font-bold text-slate-800">Procurement Cycle</h2>
           <ICBadge id="IC-4" text="Threshold Authorization" />
+        </div>
+        <div className="grid grid-cols-2 xl:grid-cols-4 gap-2">
+          {['Request', 'Purchase Order', 'Receive Goods', 'Invoice & Payment'].map((step, idx) => (
+            <div key={step} className="bg-white border border-slate-200 rounded-xl px-3 py-2 flex items-center gap-2">
+              <span className="w-5 h-5 rounded-full bg-violet-600 text-white text-[10px] font-bold flex items-center justify-center">{idx + 1}</span>
+              <span className="text-xs font-bold text-slate-700">{step}</span>
+            </div>
+          ))}
         </div>
         <div className="grid grid-cols-1 xl:grid-cols-2 gap-4">
           {/* PO List */}
@@ -455,7 +587,7 @@ export default function OwnerDashboard({ user, activeTab }: { user: User; active
                     </div>
                     <button onClick={() => setPoModalItem(item)}
                       className="text-[10px] font-bold px-2.5 py-1.5 rounded-lg bg-violet-50 text-violet-700 border border-violet-200 hover:bg-violet-100 transition-colors">
-                      Generate PO
+                      Create PO
                     </button>
                   </div>
                 );
@@ -492,8 +624,8 @@ export default function OwnerDashboard({ user, activeTab }: { user: User; active
         <KPICard label="VAT Payable Tracking" value={`Rp ${totalTax.toLocaleString('id-ID')}`}
           sub="11% of revenue" accent="bg-sky-100"
           icon={<svg className="w-5 h-5 text-sky-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 14l6-6m-5.5.5h.01m4.99 5h.01M19 21V5a2 2 0 00-2-2H7a2 2 0 00-2 2v16l3.5-2 3.5 2 3.5-2 3.5 2z" /></svg>} />
-        <KPICard label="Total Expenses" value={`Rp ${totalExp.toLocaleString('id-ID')}`}
-          sub={`${approvedExp.length} approved`} accent="bg-amber-100"
+        <KPICard label="Operating Expenses" value={`Rp ${totalOperatingExpenses.toLocaleString('id-ID')}`}
+          sub={`${operatingExpenseEntries.length} journal entries`} accent="bg-amber-100"
           icon={<svg className="w-5 h-5 text-amber-700" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={1.8} d="M9 5H7a2 2 0 00-2 2v12a2 2 0 002 2h10a2 2 0 002-2V7a2 2 0 00-2-2h-2M9 5a2 2 0 002 2h2a2 2 0 002-2M9 5a2 2 0 012-2h2a2 2 0 012 2m-6 9l2 2 4-4" /></svg>} />
       </div>
 
@@ -528,59 +660,7 @@ export default function OwnerDashboard({ user, activeTab }: { user: User; active
           </div>
         </div>
 
-        {/* Expense Approval */}
-        <div className="bg-white border border-slate-200 rounded-2xl overflow-hidden">
-          <div className="px-5 py-4 border-b border-slate-100 flex items-center justify-between">
-            <h3 className="text-sm font-bold text-slate-700">Expense Approval</h3>
-            <div className="flex items-center gap-2">
-              <select value={expenseSort} onChange={e => setExpenseSort(e.target.value as typeof expenseSort)}
-                className="text-[10px] font-bold rounded-lg border border-slate-200 bg-white px-2 py-1 text-slate-600 outline-none">
-                <option value="newest">Newest date</option>
-                <option value="oldest">Oldest date</option>
-                <option value="amount">Highest amount</option>
-              </select>
-              {pendingExp.length > 0 && <span className="text-[10px] bg-orange-50 text-orange-700 border border-orange-200 px-2 py-0.5 rounded-full font-bold">{pendingExp.length} PENDING</span>}
-            </div>
-          </div>
-          <div className="divide-y divide-slate-100 max-h-80 overflow-y-auto">
-            {pendingExp.length === 0 && <div className="px-5 py-8 text-center text-sm text-slate-400">No pending expenses</div>}
-            {sortedPendingExpenses.map(exp => (
-              <div key={exp.expense_id} className="px-5 py-3.5">
-                <div className="flex items-start justify-between gap-2">
-                  <div className="min-w-0">
-                    <p className="text-xs font-semibold text-slate-800 truncate">{exp.expense_name}</p>
-                    <p className="text-[10px] text-slate-500">
-                      {exp.category} · requested by {getUserById(exp.submitted_by)?.full_name ?? exp.submitted_by}
-                    </p>
-                    <p className="text-[10px] text-slate-400">{new Date(exp.expense_date).toLocaleString('id-ID')}</p>
-                    <p className="text-sm font-bold text-slate-900 mt-1">Rp {exp.amount.toLocaleString('id-ID')}</p>
-                  </div>
-                  <div className="flex gap-1 shrink-0">
-                    <button onClick={() => { setApprovingId(exp.expense_id); setTimeout(() => { approveExpense(exp.expense_id, user.user_id); setApprovingId(null); }, 400); }}
-                      disabled={approvingId === exp.expense_id}
-                      className="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-700 disabled:bg-emerald-300 text-white text-[10px] font-bold rounded-lg transition-colors">
-                      {approvingId === exp.expense_id ? '...' : 'Approve'}
-                    </button>
-                    <button onClick={() => rejectExpense(exp.expense_id, user.user_id)}
-                      className="px-3 py-1.5 bg-red-50 text-red-600 border border-red-200 hover:bg-red-100 text-[10px] font-bold rounded-lg transition-colors">Reject</button>
-                  </div>
-                </div>
-              </div>
-            ))}
-            {sortedApprovedExpenses.slice(0, 3).map(exp => (
-              <div key={exp.expense_id} className="px-5 py-3 flex items-center gap-3 opacity-60">
-                <div className="w-5 h-5 bg-emerald-100 rounded-full flex items-center justify-center shrink-0">
-                  <svg className="w-3 h-3 text-emerald-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth={2.5} d="M5 13l4 4L19 7" /></svg>
-                </div>
-                <div className="flex-1 min-w-0">
-                  <p className="text-xs font-medium text-slate-600 truncate">{exp.expense_name}</p>
-                  <p className="text-[10px] text-slate-400">{exp.category} · {new Date(exp.expense_date).toLocaleDateString('id-ID')}</p>
-                </div>
-                <span className="text-[10px] bg-emerald-50 text-emerald-600 border border-emerald-200 px-1.5 py-0.5 rounded-full font-bold">APPROVED</span>
-              </div>
-            ))}
-          </div>
-        </div>
+        <GeneralJournalPanel latestEntries={latestOperatingExpenseEntries} onPost={handlePostGeneralJournal} />
       </div>
 
       {/* Bottom row */}

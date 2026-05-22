@@ -21,10 +21,10 @@ export const auditTrail: AuditTrail[] = [
   },
   {
     audit_id: 'AUD-00003',
-    user_id: 'USR-00004', // Ahmad (Cashier)
-    action: 'CREATE_EXPENSE',
-    module: 'Expenses',
-    target_id: 'EXP-00002',
+    user_id: 'USR-00010', // Linda (Owner)
+    action: 'GENERATE_PO',
+    module: 'Procurement',
+    target_id: 'PO-SEED-00001',
     timestamp: '2024-05-15T14:30:00Z',
     ip_address: '192.168.1.104'
   },
@@ -40,27 +40,27 @@ export const auditTrail: AuditTrail[] = [
   {
     audit_id: 'AUD-00005',
     user_id: 'USR-00010', // Linda
-    action: 'APPROVE_EXPENSE',
-    module: 'Expenses',
-    target_id: 'EXP-00002',
+    action: 'RECEIVE_GOODS',
+    module: 'Procurement',
+    target_id: 'PO-SEED-00001',
     timestamp: '2024-05-15T14:35:00Z',
     ip_address: '192.168.1.200'
   },
   {
     audit_id: 'AUD-00006',
-    user_id: 'USR-00003', // Siti
-    action: 'CREATE_EXPENSE',
-    module: 'Expenses',
-    target_id: 'EXP-00004',
+    user_id: 'USR-00009', // Bambang (Owner)
+    action: 'CREATE_GENERAL_JOURNAL',
+    module: 'Accounting',
+    target_id: 'GJ-00001',
     timestamp: '2024-05-16T12:00:00Z',
     ip_address: '192.168.1.103'
   },
   {
     audit_id: 'AUD-00007',
     user_id: 'USR-00009', // Bambang (Owner)
-    action: 'REJECT_EXPENSE',
-    module: 'Expenses',
-    target_id: 'EXP-00004',
+    action: 'PAY_BILL',
+    module: 'Procurement',
+    target_id: 'PO-SEED-00001',
     timestamp: '2024-05-16T12:30:00Z',
     ip_address: '192.168.1.201'
   },

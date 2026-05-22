@@ -21,6 +21,7 @@ export type ActionName =
   | 'CREATE_TRANSACTION'
   | 'UPDATE_INVENTORY'
   | 'CREATE_EXPENSE'
+  | 'CREATE_GENERAL_JOURNAL'
   | 'APPROVE_EXPENSE'
   | 'REJECT_EXPENSE'
   | 'VIEW_REPORT'
@@ -33,16 +34,21 @@ export type ActionName =
   | 'CLOSE_SHIFT';
 
 type TransactionLineItem = {
-  service_id: string;
+  item_type?: 'SERVICE' | 'PRODUCT';
+  service_id?: string;
+  product_id?: string;
+  inventory_id?: string;
+  item_name?: string;
   quantity: number;
   unit_price?: number;
+  unit_cost?: number;
+  service?: { service_id?: string; unit_price?: number };
+  inventory?: { inventory_id?: string; item_name?: string; unit_cost?: number };
 };
 
 type TransactionInput = Transaction & {
-  // Optional supaya nanti kalau POS kamu sudah support multi item,
-  // AppContext ini tetap bisa deduct inventory per item, bukan cuma item pertama.
-  items?: Array<Partial<TransactionLineItem> & { service?: { service_id?: string; unit_price?: number } }>;
-  cart_items?: Array<Partial<TransactionLineItem> & { service?: { service_id?: string; unit_price?: number } }>;
+  items?: TransactionLineItem[];
+  cart_items?: TransactionLineItem[];
 };
 
 export type AppContextState = {
@@ -144,32 +150,79 @@ const getRevenueAccountByServiceId = (serviceId: string) => {
   return '4040 - Service Revenue - Other';
 };
 
+const PRODUCT_REVENUE_ACCOUNT = '4050 - Product Sales Revenue';
+
 const normalizeJournalAccount = (account: string) => {
   if (/^2010/i.test(account) && /tax|ppn|vat/i.test(account)) return '2100 - Tax Payable (PPN)';
   if (/^1020/i.test(account)) return '1020 - Cash in Bank';
   return account;
 };
 
-const normalizeJournalEntry = (entry: JournalEntry): JournalEntry => ({
-  ...entry,
-  debit_account: normalizeJournalAccount(entry.debit_account),
-  credit_account: normalizeJournalAccount(entry.credit_account),
-});
+const normalizeJournalEntry = (entry: JournalEntry): JournalEntry => {
+  const normalized: JournalEntry = {
+    ...entry,
+    debit_account: normalizeJournalAccount(entry.debit_account),
+    credit_account: normalizeJournalAccount(entry.credit_account),
+  };
+
+  if (/^Approved expense:/i.test(normalized.description ?? '')) {
+    const isStockPurchase = /^1110/i.test(normalized.debit_account);
+    return {
+      ...normalized,
+      transaction_ref: normalized.transaction_ref.replace(/^EXP-/i, isStockPurchase ? 'PO-' : 'GJ-'),
+      description: normalized.description?.replace(
+        /^Approved expense:/i,
+        isStockPurchase ? 'Procurement receipt:' : 'General journal:',
+      ),
+      entry_type: isStockPurchase ? 'PROCUREMENT' : 'EXPENSE',
+    };
+  }
+
+  return normalized;
+};
+
+const normalizeAuditEntry = (entry: AuditTrail): AuditTrail => {
+  if (!['CREATE_EXPENSE', 'APPROVE_EXPENSE', 'REJECT_EXPENSE'].includes(entry.action)) return entry;
+
+  return {
+    ...entry,
+    action: 'CREATE_GENERAL_JOURNAL' as AuditTrail['action'],
+    module: 'Accounting',
+    target_id: entry.target_id?.replace(/^EXP-/i, 'GJ-') ?? entry.target_id,
+    details: entry.details?.replace(/expense/gi, 'journal entry'),
+  };
+};
 
 const getTransactionLineItems = (txn: TransactionInput): TransactionLineItem[] => {
   const rawItems = txn.items ?? txn.cart_items;
 
   if (Array.isArray(rawItems) && rawItems.length > 0) {
     return rawItems
-      .map((item) => ({
-        service_id: item.service_id ?? item.service?.service_id ?? '',
-        quantity: Number(item.quantity ?? 1),
-        unit_price: item.unit_price ?? item.service?.unit_price,
-      }))
-      .filter((item) => item.service_id && item.quantity > 0);
+      .map((item) => {
+        const inventoryId = item.inventory_id ?? item.product_id ?? item.inventory?.inventory_id;
+        const serviceId = item.service_id ?? item.service?.service_id;
+        const itemType = item.item_type ?? (inventoryId ? 'PRODUCT' : 'SERVICE');
+
+        return {
+          item_type: itemType,
+          service_id: serviceId,
+          product_id: item.product_id ?? inventoryId,
+          inventory_id: inventoryId,
+          item_name: item.item_name ?? item.inventory?.item_name,
+          quantity: Number(item.quantity ?? 1),
+          unit_price: Number(item.unit_price ?? item.service?.unit_price ?? 0),
+          unit_cost: Number(item.unit_cost ?? item.inventory?.unit_cost ?? 0),
+        };
+      })
+      .filter((item) => {
+        const hasReference = item.item_type === 'PRODUCT'
+          ? Boolean(item.inventory_id || item.product_id)
+          : Boolean(item.service_id);
+        return hasReference && item.quantity > 0;
+      });
   }
 
-  return [{ service_id: txn.service_id, quantity: Number(txn.quantity || 1) }];
+  return [{ item_type: 'SERVICE', service_id: txn.service_id, quantity: Number(txn.quantity || 1) }];
 };
 
 const getPackageUnitCount = (itemName: string) => {
@@ -195,14 +248,20 @@ const generateSalesJournalEntries = (txn: TransactionInput): JournalEntry[] => {
   const revenueByAccount = new Map<string, number>();
 
   lines.forEach((line) => {
-    const amount = line.unit_price ? Math.round(line.unit_price * line.quantity) : 0;
-    const account = getRevenueAccountByServiceId(line.service_id);
+    const fallbackPrice = line.service_id ? services.find((svc) => svc.service_id === line.service_id)?.unit_price ?? 0 : 0;
+    const amount = Math.round(Number(line.unit_price || fallbackPrice) * line.quantity);
+    if (amount <= 0) return;
+
+    const account = line.item_type === 'PRODUCT' ? PRODUCT_REVENUE_ACCOUNT : getRevenueAccountByServiceId(line.service_id ?? '');
     revenueByAccount.set(account, (revenueByAccount.get(account) ?? 0) + amount);
   });
 
   if (Array.from(revenueByAccount.values()).reduce((sum, amount) => sum + amount, 0) !== txn.subtotal) {
     revenueByAccount.clear();
-    revenueByAccount.set(getRevenueAccountByServiceId(txn.service_id), txn.subtotal);
+    const fallbackAccount = lines.length > 0 && lines.every((line) => line.item_type === 'PRODUCT')
+      ? PRODUCT_REVENUE_ACCOUNT
+      : getRevenueAccountByServiceId(txn.service_id);
+    revenueByAccount.set(fallbackAccount, txn.subtotal);
   }
 
   const entries: JournalEntry[] = Array.from(revenueByAccount.entries()).map(([revenueAccount, amount], index) => ({
@@ -245,6 +304,28 @@ const generateCOGSJournalEntries = (args: {
   const entries: JournalEntry[] = [];
 
   lines.forEach((line, lineIndex) => {
+    if (line.item_type === 'PRODUCT') {
+      const item = args.currentInventory.find((inv) =>
+        inv.inventory_id === line.inventory_id || inv.inventory_id === line.product_id,
+      );
+      const unitCost = Number(line.unit_cost || item?.unit_cost || 0);
+      const amount = Math.round(unitCost * line.quantity);
+      if (amount <= 0) return;
+
+      entries.push({
+        journal_id: `JRN-COGS-${args.txn.transaction_id}-${lineIndex}-${Date.now()}`,
+        transaction_ref: args.txn.transaction_id,
+        debit_account: '5000 - Cost of Goods Sold',
+        credit_account: '1110 - Inventory',
+        amount,
+        description: `COGS for product sale: ${line.item_name ?? item?.item_name ?? line.inventory_id}`,
+        created_by: args.txn.cashier_id,
+        entry_date: entryDate,
+        entry_type: 'COGS',
+      });
+      return;
+    }
+
     const service = services.find((svc) => svc.service_id === line.service_id);
     if (!service?.cogs_mapping?.length) return;
 
@@ -304,7 +385,9 @@ export const AppProvider = ({
 
   // Lazy initialization: dibaca sekali saat AppProvider pertama kali mount.
   // Kalau localStorage kosong/rusak, fallback ke seed data.
-  const [auditTrail, setAuditTrail] = useState<AuditTrail[]>(() => loadArrayFromStorage(STORAGE_KEYS.auditTrail, seedAuditTrail));
+  const [auditTrail, setAuditTrail] = useState<AuditTrail[]>(() =>
+    loadArrayFromStorage(STORAGE_KEYS.auditTrail, seedAuditTrail).map(normalizeAuditEntry),
+  );
   const [transactions, setTransactions] = useState<Transaction[]>(() => loadArrayFromStorage(STORAGE_KEYS.transactions, seedTransactions));
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>(() =>
     loadArrayFromStorage(STORAGE_KEYS.journalEntries, seedJournalEntries).map(normalizeJournalEntry),
@@ -385,6 +468,11 @@ export const AppProvider = ({
     setInventory((prev: Inventory[]) =>
       prev.map((item: Inventory) => {
         const totalDeduction = lines.reduce((sum, line) => {
+          if (line.item_type === 'PRODUCT') {
+            const matchesProduct = item.inventory_id === line.inventory_id || item.inventory_id === line.product_id;
+            return matchesProduct ? sum + line.quantity : sum;
+          }
+
           const service = services.find((svc) => svc.service_id === line.service_id);
           const mapping = service?.cogs_mapping?.find((map) => map.inventory_id === item.inventory_id);
           if (!mapping) return sum;
@@ -402,6 +490,11 @@ export const AppProvider = ({
     setInventory((prev: Inventory[]) =>
       prev.map((item: Inventory) => {
         const totalRestore = lines.reduce((sum, line) => {
+          if (line.item_type === 'PRODUCT') {
+            const matchesProduct = item.inventory_id === line.inventory_id || item.inventory_id === line.product_id;
+            return matchesProduct ? sum + line.quantity : sum;
+          }
+
           const service = services.find((svc) => svc.service_id === line.service_id);
           const mapping = service?.cogs_mapping?.find((map) => map.inventory_id === item.inventory_id);
           if (!mapping) return sum;
@@ -470,7 +563,7 @@ export const AppProvider = ({
         debit_account: isInventoryExpense ? '1110 - Inventory' : '5010 - Operating Expense',
         credit_account: '1010 - Cash',
         amount: exp.amount,
-        description: `Approved expense: ${exp.expense_name}`,
+        description: `General journal: ${exp.expense_name}`,
         created_by: approvedBy,
         entry_date: new Date().toISOString(),
         entry_type: 'EXPENSE',
